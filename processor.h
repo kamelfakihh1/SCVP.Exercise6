@@ -12,12 +12,15 @@
 #include <tlm.h>
 #include <tlm_utils/tlm_quantumkeeper.h>
 
+#define TIME_QUANTUM 100000
 
 class processor : public sc_module, tlm::tlm_bw_transport_if<>
 {
 private:
 	std::ifstream file;
 	sc_time cycleTime;
+
+	tlm_utils::tlm_quantumkeeper quantumKeeper;
 
 	// Method:
     void processTrace();
@@ -50,7 +53,10 @@ processor::processor(sc_module_name, std::string pathToFile, sc_time cycleTime) 
 	if (!file.is_open())
 		SC_REPORT_FATAL(name(), "Could not open trace");
 
-    SC_THREAD(processTrace);
+	quantumKeeper.set_global_quantum(sc_time(TIME_QUANTUM,SC_NS)); // STATIC!
+	quantumKeeper.reset();
+
+    SC_THREAD(processRandom);
 
 	iSocket.bind(*this);
 }
@@ -200,7 +206,7 @@ void processor::processTrace()
 
 void processor::processRandom()
 {
-    wait(SC_ZERO_TIME);
+    // wait(SC_ZERO_TIME);
 
     tlm::tlm_generic_payload trans;
 
@@ -223,15 +229,23 @@ void processor::processRandom()
 
     for (uint64_t transId = 0; transId < 100000000; transId++)
     {
+		sc_time delay = quantumKeeper.get_local_time(); 
+
         cycles = distrCycle(randGenerator);
         address = distrAddr(randGenerator);
 
-        sc_time delay = cycles * cycleTime;
+        // sc_time delay = cycles * cycleTime;
 
         trans.set_address(address);
         iSocket->b_transport(trans, delay);
 
-        wait(delay);
+		quantumKeeper.inc(delay); // Anotate the time of the target
+		quantumKeeper.inc(cycles * cycleTime); // Consume computation time
+
+		if(quantumKeeper.need_sync())
+		{
+			quantumKeeper.sync();
+		}
     }
 
     // End Simulation because there are no events.
